@@ -1,20 +1,18 @@
 #!/usr/bin/env python3
-"""Entry program for the news-image-20261122 competition.
+"""news-image-20261122 entry program: ship entry.png to the output.
 
-It copies the front page drawn by generate_image.py, entry.png beside
-this file, to the grader's output directory. Standard library only.
-
-Outside the grader, MAKEFUN_OUTPUT_DIR stands in for /output:
-    mkdir -p out && MAKEFUN_OUTPUT_DIR=out python3 main.py
+The front page itself is drawn by generate_image.py at build time; this
+program only copies the finished PNG where the grader expects it, and
+uses nothing outside the Python standard library.
 """
 
 import os
 import shutil
 from pathlib import Path
 
-HERE = Path(__file__).resolve().parent
-OUT = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
+ROOT = Path(__file__).resolve().parent
+DEST = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 
-OUT.mkdir(parents=True, exist_ok=True)
-shutil.copyfile(HERE / "entry.png", OUT / "entry.png")
-print("wrote", OUT / "entry.png")
+DEST.mkdir(parents=True, exist_ok=True)
+shutil.copyfile(ROOT / "entry.png", DEST / "entry.png")
+print("entry.png ->", DEST / "entry.png")

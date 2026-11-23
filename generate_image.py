@@ -1,275 +1,242 @@
 #!/usr/bin/env python3
-"""Draw the front page of Sunday 22 November 2026's world news.
+"""Front page for one day's world news: Sunday 22 November 2026.
 
-A single 1024x1024 PNG, drawn from scratch with Pillow: masthead, a lead
-story on the COP31 collapse, six illustrated story cards, and an
-also-today strip. No text is pasted in as an image; every word is set
-with Liberation fonts so it stays crisp at any size.
+Everything on the page is drawn with Pillow at build time — masthead,
+the COP31 lead, six story cards with small spot illustrations, and an
+also-today strip — then saved as a single 1024x1024 entry.png.
 """
 
-import textwrap
+import math
 
 from PIL import Image, ImageDraw, ImageFont
 
-W, H = 1024, 1024
-PAPER = (248, 244, 232)
-INK = (25, 25, 25)
-RED = (155, 28, 28)
-BLUE = (31, 78, 121)
-GREY = (90, 86, 76)
-RULE = (150, 144, 128)
-LIGHT = (233, 227, 210)
+SIZE = 1024
+PAPER = (250, 246, 236)
+INK = (28, 26, 23)
+ACCENT = (168, 32, 26)
+NAVY = (34, 74, 110)
+MUTED = (96, 91, 80)
+HAIR = (172, 165, 146)
+SKY = (186, 218, 238)
+LEAF = (92, 146, 78)
+FIRE = (216, 112, 30)
+GOLD = (240, 190, 40)
 
-SERIF = "/usr/share/fonts/truetype/liberation/LiberationSerif-Regular.ttf"
-SERIF_B = "/usr/share/fonts/truetype/liberation/LiberationSerif-Bold.ttf"
-SANS = "/usr/share/fonts/truetype/liberation/LiberationSans-Regular.ttf"
-SANS_B = "/usr/share/fonts/truetype/liberation/LiberationSans-Bold.ttf"
+FONT_DIR = "/usr/share/fonts/truetype/liberation"
+SERIF = f"{FONT_DIR}/LiberationSerif-Regular.ttf"
+SERIF_BOLD = f"{FONT_DIR}/LiberationSerif-Bold.ttf"
+SANS = f"{FONT_DIR}/LiberationSans-Regular.ttf"
+SANS_BOLD = f"{FONT_DIR}/LiberationSans-Bold.ttf"
 
 
-def font(path, size):
+def fnt(path, size):
     return ImageFont.truetype(path, size)
 
 
-def wrap(draw, text, fnt, width):
-    """Greedy word wrap measured with the real font, never overflowing."""
-    words = text.split()
-    lines, cur = [], ""
-    for word in words:
-        trial = word if not cur else cur + " " + word
-        if draw.textlength(trial, font=fnt) <= width or not cur:
-            cur = trial
+def centered(draw, cx, y, text, path, size, fill):
+    f = fnt(path, size)
+    draw.text((cx - draw.textlength(text, font=f) / 2, y), text, font=f,
+              fill=fill)
+
+
+def wrapped_lines(draw, text, f, max_width):
+    """Split text into lines that fit max_width in the given font."""
+    lines = []
+    line = ""
+    for word in text.split():
+        trial = word if line == "" else line + " " + word
+        if line == "" or draw.textlength(trial, font=f) <= max_width:
+            line = trial
         else:
-            lines.append(cur)
-            cur = word
-    if cur:
-        lines.append(cur)
+            lines.append(line)
+            line = word
+    if line:
+        lines.append(line)
     return lines
 
 
-def para(draw, x, y, text, fnt, width, fill=INK, leading=None):
-    """Draw wrapped text; return the y just below the last line."""
-    if leading is None:
-        leading = int(fnt.size * 1.25)
-    for line in wrap(draw, text, fnt, width):
-        draw.text((x, y), line, font=fnt, fill=fill)
-        y += leading
+def paragraph(draw, x, y, text, path, size, max_width, fill=INK, step=None):
+    f = fnt(path, size)
+    if step is None:
+        step = round(size * 1.3)
+    for line in wrapped_lines(draw, text, f, max_width):
+        draw.text((x, y), line, font=f, fill=fill)
+        y += step
     return y
 
 
-def hline(draw, x0, x1, y, fill=INK, width=2):
-    draw.line([(x0, y), (x1, y)], fill=fill, width=width)
+def rule(draw, x0, x1, y, fill=INK, width=2):
+    draw.line([x0, y, x1, y], fill=fill, width=width)
 
 
-def draw_globe(draw, cx, cy, r):
-    """A simple globe: sea circle, latitude arcs, land blobs, a crack."""
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(178, 214, 235),
-                 outline=INK, width=3)
-    for dy, rw in ((-52, 96), (-18, 116), (18, 116), (52, 96)):
-        draw.arc([cx - rw, cy + dy - 26, cx + rw, cy + dy + 26],
-                 start=200, end=340, fill=BLUE, width=2)
-    draw.arc([cx - 52, cy - r, cx + 52, cy + r], start=270, end=90,
-             fill=BLUE, width=2)
-    draw.arc([cx - 52, cy - r, cx + 52, cy + r], start=90, end=270,
-             fill=BLUE, width=2)
-    # Land masses as rough blobs.
-    draw.ellipse([cx - 92, cy - 78, cx - 18, cy - 8], fill=(86, 140, 74))
-    draw.ellipse([cx - 58, cy - 58, cx - 6, cy - 20], fill=(86, 140, 74))
-    draw.ellipse([cx + 8, cy + 12, cx + 88, cy + 82], fill=(106, 158, 88))
-    draw.ellipse([cx + 34, cy - 88, cx + 96, cy - 34], fill=(96, 148, 80))
-    # A crack running across the globe: the talks broke down.
-    crack = [(cx - 70, cy - 96), (cx - 38, cy - 52), (cx - 58, cy - 8),
-             (cx - 12, cy + 34), (cx - 34, cy + 78), (cx + 6, cy + 108)]
-    draw.line(crack, fill=RED, width=4, joint="curve")
-
-
-def icon_burst(draw, x, y, s):
-    """Orange blast star for the drone strike card."""
+def star_points(cx, cy, outer, inner, count, phase=-math.pi / 2):
     pts = []
-    import math
-    for i in range(16):
-        ang = math.pi * i / 8
-        rad = s if i % 2 == 0 else s * 0.45
-        pts.append((x + s + rad * math.cos(ang), y + s + rad * math.sin(ang)))
-    draw.polygon(pts, fill=(214, 110, 30))
-    draw.ellipse([x + s * 0.7, y + s * 0.7, x + s * 1.3, y + s * 1.3],
-                 fill=(248, 244, 232))
+    for i in range(count * 2):
+        r = outer if i % 2 == 0 else inner
+        a = phase + math.pi * i / count
+        pts.append((cx + r * math.cos(a), cy + r * math.sin(a)))
+    return pts
 
 
-def icon_bridge(draw, x, y, s):
-    """A suspension bridge silhouette."""
-    draw.line([(x, y + s * 1.6), (x + 2 * s, y + s * 1.6)], fill=INK, width=4)
-    draw.arc([x + s * 0.2, y + s * 0.1, x + s * 1.8, y + s * 1.7],
-             start=180, end=360, fill=INK, width=3)
-    for fx in (0.35, 0.65, 0.95, 1.25, 1.55):
-        draw.line([(x + fx * s, y + s * 0.75), (x + fx * s, y + s * 1.6)],
-                  fill=INK, width=2)
-    draw.line([(x + s * 0.2, y + s * 0.2), (x + s * 0.2, y + s * 1.6)],
-              fill=INK, width=3)
-    draw.line([(x + s * 1.8, y + s * 0.2), (x + s * 1.8, y + s * 1.6)],
-              fill=INK, width=3)
+def icon_blast(d, x, y):
+    d.polygon(star_points(x + 27, y + 27, 27, 12, 8), fill=FIRE)
+    d.ellipse([x + 18, y + 18, x + 36, y + 36], fill=PAPER)
 
 
-def icon_ship(draw, x, y, s):
-    """A tanker on waves."""
-    draw.polygon([(x, y + s), (x + 2 * s, y + s), (x + 1.8 * s, y + s * 1.5),
-                  (x + 0.2 * s, y + s * 1.5)], fill=(31, 78, 121))
-    draw.rectangle([x + 0.3 * s, y + 0.5 * s, x + 0.8 * s, y + s], fill=RED)
-    draw.rectangle([x + 0.9 * s, y + 0.6 * s, x + 1.4 * s, y + s], fill=INK)
-    draw.rectangle([x + 1.5 * s, y + 0.35 * s, x + 1.7 * s, y + s], fill=GREY)
-    for wy in (1.75, 1.95):
-        draw.arc([x, y + wy * s, x + s, y + (wy + 0.25) * s],
-                 start=0, end=180, fill=BLUE, width=3)
-        draw.arc([x + s, y + wy * s, x + 2 * s, y + (wy + 0.25) * s],
-                 start=0, end=180, fill=BLUE, width=3)
+def icon_span(d, x, y):
+    d.line([x + 2, y + 46, x + 52, y + 46], fill=INK, width=4)
+    for px in (10, 44):
+        d.line([x + px, y + 8, x + px, y + 46], fill=INK, width=3)
+    d.arc([x + 2, y - 6, x + 52, y + 46], start=180, end=360, fill=INK,
+          width=3)
+    for fx in (18, 27, 36):
+        d.line([x + fx, y + 30, x + fx, y + 46], fill=INK, width=2)
 
 
-def icon_flame(draw, x, y, s):
-    """A flame built from two polygons, no glyph needed."""
-    outer = [(x + s, y), (x + 1.7 * s, y + 0.9 * s), (x + 1.9 * s, y + 1.5 * s),
-             (x + 1.4 * s, y + 2 * s), (x + 0.6 * s, y + 2 * s),
-             (x + 0.1 * s, y + 1.5 * s), (x + 0.3 * s, y + 0.9 * s)]
-    draw.polygon(outer, fill=(214, 110, 30))
-    inner = [(x + s, y + 0.7 * s), (x + 1.4 * s, y + 1.3 * s),
-             (x + 1.2 * s, y + 1.9 * s), (x + 0.8 * s, y + 1.9 * s),
-             (x + 0.6 * s, y + 1.3 * s)]
-    draw.polygon(inner, fill=(240, 190, 40))
+def icon_tanker(d, x, y):
+    d.polygon([(x + 2, y + 30), (x + 52, y + 30), (x + 46, y + 42),
+               (x + 8, y + 42)], fill=NAVY)
+    d.rectangle([x + 10, y + 18, x + 24, y + 30], fill=ACCENT)
+    d.rectangle([x + 27, y + 21, x + 39, y + 30], fill=INK)
+    d.rectangle([x + 42, y + 12, x + 47, y + 30], fill=MUTED)
+    for wx in (2, 29):
+        d.arc([x + wx, y + 44, x + wx + 25, y + 54], start=0, end=180,
+              fill=NAVY, width=3)
 
 
-def icon_badge(draw, x, y, s):
-    """A sheriff-style badge star for the cartel capture."""
-    import math
-    pts = []
-    for i in range(10):
-        ang = math.pi * i / 5 - math.pi / 2
-        rad = s if i % 2 == 0 else s * 0.55
-        pts.append((x + s + rad * math.cos(ang), y + s + rad * math.sin(ang)))
-    draw.polygon(pts, fill=(31, 78, 121))
-    draw.ellipse([x + s * 0.65, y + s * 0.65, x + s * 1.35, y + s * 1.35],
-                 fill=(248, 244, 232))
+def icon_flame(d, x, y):
+    d.polygon([(x + 27, y + 2), (x + 42, y + 24), (x + 46, y + 38),
+               (x + 38, y + 52), (x + 16, y + 52), (x + 8, y + 38),
+               (x + 13, y + 22)], fill=FIRE)
+    d.polygon([(x + 27, y + 22), (x + 36, y + 36), (x + 32, y + 50),
+               (x + 22, y + 50), (x + 18, y + 36)], fill=GOLD)
 
 
-def icon_factory(draw, x, y, s):
-    """A factory with a sawtooth roof and a smoking chimney."""
-    draw.polygon([(x, y + s), (x + 0.5 * s, y + 0.5 * s),
-                  (x + s, y + s), (x + 1.5 * s, y + 0.5 * s),
-                  (x + 2 * s, y + s), (x + 2 * s, y + 2 * s),
-                  (x, y + 2 * s)], fill=GREY)
-    draw.rectangle([x + 1.7 * s, y, x + 2 * s, y + s], fill=INK)
-    for sx, sy, sr in ((x + 1.85 * s, y - 0.1 * s, 7),
-                       (x + 2.05 * s, y - 0.3 * s, 8)):
-        draw.ellipse([sx - sr, sy - sr, sx + sr, sy + sr],
-                     fill=(120, 118, 110))
+def icon_badge(d, x, y):
+    d.polygon(star_points(x + 27, y + 27, 26, 15, 5), fill=NAVY)
+    d.ellipse([x + 18, y + 18, x + 36, y + 36], fill=PAPER)
 
 
-def card(draw, x, y, w, h, kicker, headline, body, icon):
-    draw.rectangle([x, y, x + w, y + h], outline=RULE, width=1)
-    draw.rectangle([x, y, x + w, y + 4], fill=RED)
-    ix, iy, isize = x + 14, y + 16, 22
-    icon(draw, ix, iy, isize)
-    tx = x + 14 + 2 * isize + 12
-    draw.text((tx, y + 14), kicker, font=font(SANS_B, 13), fill=RED)
-    hy = para(draw, tx, y + 36, headline, font(SANS_B, 19), w - (tx - x) - 14,
-              leading=23)
-    para(draw, x + 14, y + 96, body, font(SANS, 14), w - 28, fill=GREY,
-         leading=18)
+def icon_plant(d, x, y):
+    d.polygon([(x + 2, y + 26), (x + 15, y + 14), (x + 28, y + 26),
+               (x + 41, y + 14), (x + 52, y + 26), (x + 52, y + 52),
+               (x + 2, y + 52)], fill=MUTED)
+    d.rectangle([x + 42, y + 2, x + 50, y + 20], fill=INK)
+    for cx, cy, r in ((48, 0, 5), (54, -6, 6)):
+        d.ellipse([x + cx - r, y + cy - r, x + cx + r, y + cy + r],
+                  fill=(128, 124, 114))
 
 
-def main():
-    img = Image.new("RGB", (W, H), PAPER)
-    draw = ImageDraw.Draw(img)
-    mx = 36
-    right = W - mx
+def icon_globe(d, cx, cy, r):
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=SKY, outline=INK,
+              width=3)
+    for frac in (-0.5, 0.0, 0.5):
+        yy = cy + frac * r
+        half = r * math.sqrt(1 - frac * frac)
+        d.line([cx - half, yy, cx + half, yy], fill=NAVY, width=2)
+    d.ellipse([cx - r * 0.45, cy - r, cx + r * 0.45, cy + r], outline=NAVY,
+              width=2)
+    d.ellipse([cx - 70, cy - 66, cx - 14, cy - 14], fill=LEAF)
+    d.ellipse([cx + 16, cy + 18, cx + 78, cy + 74], fill=LEAF)
+    d.ellipse([cx + 30, cy - 80, cx + 84, cy - 30], fill=LEAF)
+    zigzag = [(cx - 58, cy - 88), (cx - 30, cy - 44), (cx - 50, cy - 2),
+              (cx - 14, cy + 40), (cx - 30, cy + 80), (cx + 2, cy + 100)]
+    d.line(zigzag, fill=ACCENT, width=4, joint="curve")
 
-    # ---- Masthead -----------------------------------------------------
-    title = "THE WORLD IN ONE PAGE"
-    tf = font(SERIF_B, 56)
-    draw.text(((W - draw.textlength(title, font=tf)) / 2, 26), title,
-              font=tf, fill=INK)
-    hline(draw, mx, right, 104, width=3)
-    date = "SUNDAY 22 NOVEMBER 2026"
-    df = font(SANS_B, 38)
-    draw.text(((W - draw.textlength(date, font=df)) / 2, 116), date,
-              font=df, fill=RED)
-    sub = "T H E   D A Y ' S   W O R L D   N E W S   —   I N   O N E   P I C T U R E"
-    sf = font(SANS, 14)
-    draw.text(((W - draw.textlength(sub, font=sf)) / 2, 164), sub,
-              font=sf, fill=GREY)
-    hline(draw, mx, right, 188, width=2)
 
-    # ---- Lead story ---------------------------------------------------
-    ly = 206
-    draw.text((mx, ly), "CLIMATE SUMMIT  •  ANTALYA, TURKEY",
-              font=font(SANS_B, 15), fill=RED)
-    hy = para(draw, mx, ly + 28,
-              "CLIMATE TALKS COLLAPSE AFTER A RECORD 48 HOURS OF OVERTIME",
-              font(SERIF_B, 34), 620, leading=40)
-    para(draw, mx, hy + 10,
-         "Nations at the UN COP31 summit failed to agree a final deal on "
-         "Sunday, as a standoff over phasing out fossil fuels blocked any "
-         "consensus after two weeks of talks. The UN chief said he was "
-         "deeply disappointed.",
-         font(SANS, 17), 620, fill=INK, leading=23)
-    draw_globe(draw, 826, 318, 112)
-    cap = "COP31 ends with no deal"
-    cf = font(SANS, 14)
-    draw.text((826 - draw.textlength(cap, font=cf) / 2, 446), cap,
-              font=cf, fill=GREY)
-    hline(draw, mx, right, 486, width=2)
+STORIES = [
+    ("UKRAINE WAR", "RUSSIAN DRONES STRIKE HOMES OUTSIDE KYIV",
+     "An overnight barrage of 186 drones hit a five-storey apartment "
+     "block in the Kyiv region, killing three people.", icon_blast),
+    ("UKRAINE WAR", "KERCH BRIDGE RAIL LINK HIT A THIRD TIME",
+     "Kyiv's forces struck the railway span of the bridge linking "
+     "Russia to occupied Crimea once again.", icon_span),
+    ("MIDDLE EAST", "THREE TANKERS HIT NEAR STRAIT OF HORMUZ",
+     "Iran struck three oil tankers as its confrontation with the US "
+     "over a naval blockade sharpened.", icon_tanker),
+    ("WEST BANK", "SETTLER ARSON DENOUNCED AS TERRORISM",
+     "Cars and houses were set alight overnight; Gadi Eisenkot "
+     "condemned the attacks as \u201cJewish terrorism\u201d.", icon_flame),
+    ("MEXICO", "CARTEL FIGURE \u2018EL CHAPO ISIDRO\u2019 SEIZED",
+     "Mexican forces captured the Sinaloa cartel boss after a gun "
+     "battle that left 11 people dead.", icon_badge),
+    ("INDONESIA", "CANDY FACTORY BLAZE LEAVES DOZENS MISSING",
+     "Fire swept through a Banten candy factory; three deaths are "
+     "confirmed and about 36 people are still missing.", icon_plant),
+]
 
-    # ---- Six story cards ----------------------------------------------
-    cards = [
-        ("UKRAINE", "DRONES HIT HOMES NEAR KYIV",
-         "Russia fired 186 drones overnight; a five-storey block was hit "
-         "and three people were killed.", icon_burst),
-        ("UKRAINE", "KERCH BRIDGE HIT AGAIN",
-         "Ukraine struck the railway section of the bridge to Crimea for a "
-         "third time.", icon_bridge),
-        ("THE GULF", "TANKERS STRUCK NEAR HORMUZ",
-         "Iran hit three tankers as its standoff with the United States "
-         "over a naval blockade deepened.", icon_ship),
-        ("WEST BANK", "SETTLER ARSON CONDEMNED",
-         "Settlers torched cars and homes overnight; Israel's opposition "
-         "leader called it \u201cJewish terrorism\u201d.", icon_flame),
-        ("MEXICO", "CARTEL BOSS CAPTURED",
-         "\u201cEl Chapo Isidro\u201d was seized in Sinaloa after a gun "
-         "battle that left 11 people dead.", icon_badge),
-        ("INDONESIA", "FACTORY FIRE: DOZENS MISSING",
-         "A blaze tore through a candy factory in Banten; three were "
-         "confirmed dead and about 36 missing.", icon_factory),
-    ]
-    cw, ch, gap = 306, 176, 17
-    for i, (kick, head, body, icon) in enumerate(cards):
-        cx = mx + (i % 3) * (cw + gap)
-        cy = 504 + (i // 3) * (ch + gap)
-        card(draw, cx, cy, cw, ch, kick, head, body, icon)
+BRIEFS = [
+    ("ISRAEL POLITICS", "Netanyahu\u2013Eisenkot coalition talks end "
+     "after four hours with no agreement."),
+    ("NIGERIA", "A boat ferrying funeral guests capsizes in Bayelsa; "
+     "at least 24 people drown."),
+    ("ASIA", "Nepal's prime minister opens his first visit to India; "
+     "Beijing loosens margin-lending rules."),
+]
 
-    # ---- Also today ----------------------------------------------------
-    ay = 892
-    hline(draw, mx, right, ay, width=2)
-    draw.text((mx, ay + 12), "ALSO TODAY", font=font(SANS_B, 15), fill=RED)
-    also = [
-        ("ISRAEL", "Coalition talks fail: Netanyahu and Eisenkot meet for "
-                   "four hours and reach no deal."),
-        ("NIGERIA", "A boat carrying mourners to a funeral capsizes in "
-                    "Bayelsa; at least 24 people drown."),
-        ("ASIA", "Nepal's PM begins his first visit to India; China eases "
-                 "margin rules for share buyers."),
-    ]
-    for i, (kick, text) in enumerate(also):
-        ax = mx + i * (cw + gap)
-        draw.text((ax, ay + 38), kick, font=font(SANS_B, 13), fill=RED)
-        para(draw, ax, ay + 58, text, font(SANS, 13), cw, fill=INK,
-             leading=17)
-    hline(draw, mx, right, 988, width=1, fill=RULE)
-    foot = ("Events of Sunday 22 November 2026, as reported by AP, Reuters, "
-            "Al Jazeera, The Hindu and WION.")
-    ff = font(SANS, 11)
-    draw.text(((W - draw.textlength(foot, font=ff)) / 2, 996), foot,
-              font=ff, fill=GREY)
 
-    img.save("entry.png", optimize=True)
-    print("saved entry.png", img.size)
+def story_card(d, x, y, w, h, section, headline, body, icon):
+    d.rectangle([x, y, x + w, y + h], outline=HAIR, width=1)
+    d.rectangle([x, y, x + w, y + 4], fill=ACCENT)
+    icon(d, x + 12, y + 14)
+    tx = x + 78
+    d.text((tx, y + 13), section, font=fnt(SANS_BOLD, 13), fill=ACCENT)
+    hy = paragraph(d, tx, y + 34, headline, SANS_BOLD, 19,
+                   w - (tx - x) - 12, step=23)
+    paragraph(d, x + 12, max(y + 106, hy + 4), body, SANS, 14, w - 24,
+              fill=MUTED, step=18)
+
+
+def build_page():
+    img = Image.new("RGB", (SIZE, SIZE), PAPER)
+    d = ImageDraw.Draw(img)
+    left, right = 40, SIZE - 40
+
+    centered(d, SIZE / 2, 28, "THE WORLD IN ONE PAGE", SERIF_BOLD, 54, INK)
+    rule(d, left, right, 100, width=3)
+    centered(d, SIZE / 2, 112, "SUNDAY 22 NOVEMBER 2026", SANS_BOLD, 40,
+             ACCENT)
+    centered(d, SIZE / 2, 166,
+             "T H E   D A Y ' S   W O R L D   N E W S   —   I N   O N E   "
+             "P I C T U R E", SANS, 14, MUTED)
+    rule(d, left, right, 192, width=2)
+
+    d.text((left, 210), "CLIMATE  •  ANTALYA, TURKEY",
+           font=fnt(SANS_BOLD, 15), fill=ACCENT)
+    hy = paragraph(d, left, 238,
+                   "COP31 CLIMATE TALKS BREAK DOWN AFTER 48 HOURS OF "
+                   "OVERTIME", SERIF_BOLD, 33, 600, step=39)
+    paragraph(d, left, hy + 12,
+              "Two weeks of UN climate talks in Antalya ended without a "
+              "final agreement on Sunday, deadlocked over wording on "
+              "phasing out fossil fuels. The UN secretary-general said "
+              "he was deeply disappointed by the outcome.",
+              SANS, 17, 600, step=23)
+    icon_globe(d, 824, 322, 106)
+    centered(d, 824, 442, "No deal at COP31", SANS, 14, MUTED)
+    rule(d, left, right, 482, width=2)
+
+    cw, chh, gap = 301, 172, 16
+    for i, (section, headline, body, icon) in enumerate(STORIES):
+        story_card(d, left + (i % 3) * (cw + gap), 500 + (i // 3) * (chh + gap),
+                   cw, chh, section, headline, body, icon)
+
+    ay = 876
+    rule(d, left, right, ay, width=2)
+    d.text((left, ay + 12), "ALSO TODAY", font=fnt(SANS_BOLD, 15),
+           fill=ACCENT)
+    for i, (section, text) in enumerate(BRIEFS):
+        bx = left + i * (cw + gap)
+        d.text((bx, ay + 40), section, font=fnt(SANS_BOLD, 13), fill=ACCENT)
+        paragraph(d, bx, ay + 60, text, SANS, 13, cw, step=17)
+    rule(d, left, right, 986, fill=HAIR, width=1)
+    centered(d, SIZE / 2, 994,
+             "Events of Sunday 22 November 2026, as reported by AP, "
+             "Reuters, Al Jazeera, The Hindu and WION.", SANS, 11, MUTED)
+    return img
 
 
 if __name__ == "__main__":
-    main()
+    page = build_page()
+    page.save("entry.png", optimize=True)
+    print("saved entry.png", page.size)
