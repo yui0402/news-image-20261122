@@ -14,5 +14,6 @@ ROOT = Path(__file__).resolve().parent
 DEST = Path(os.environ.get("MAKEFUN_OUTPUT_DIR", "/output"))
 
 DEST.mkdir(parents=True, exist_ok=True)
+assert (ROOT / "entry.png").is_file(), "entry.png missing beside main.py"
 shutil.copyfile(ROOT / "entry.png", DEST / "entry.png")
 print("entry.png ->", DEST / "entry.png")
